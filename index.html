@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400;1,600&family=Lora:wght@600&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div class="container">
+        <div class="page-header">
+            <div class="eyebrow">
+                <img src="Atul Bakery Logo.png" alt="" class="nav-logo">
+            </div>
+            <h1 class="title">Dashboard</h1>
+            
+            <div class="filters-bar" id="filters-container">
+                <span class="fl">Sector:</span>
+                <button class="fb active" type="button" onclick="filter('All', this)">All</button>
+            </div>
+
+            <div class="portfolio-grid" id="portfolio-grid"></div>
+        </div>
+    </div>
+
+    <footer class="main-footer">
+        <p>&copy;Atul Backery 2026. All rights reserved.</p>
+    </footer>
+
+    <script>
+        // ── THEME COLORS ──────────────────────────────────────────────
+        const THEME = '#0a5282';
+        const THEME1 = '#F9FAFB';
+
+        // ── INDUSTRY CONFIG ───────────────────────────────────────────
+        const IC = {
+    'Lead': {bg: THEME1},
+    'Sales':    {bg: THEME1},
+    'Finance': {bg: THEME1}
+        };
+
+        // ── GOOGLE SHEET CONFIG ───────────────────────────────────────
+        const SHEET_URL = "https://docs.google.com/spreadsheets/d/1YdhIhmyRebWQABDHykCsyo1JtKIO3J5lsD_0U9uMmq8/edit?usp=sharing";
+        const SHEET_GID = "0";
+
+        function resolveSheetId(url) {
+            const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/i);
+            return match ? match[1] : "1YdhIhmyRebWQABDHykCsyo1JtKIO3J5lsD_0U9uMmq8";
+        }
+
+        const SHEET_ID = resolveSheetId(SHEET_URL);
+        const sheetUrl = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${SHEET_GID}`;
+
+        let DATA = [];
+        let AF = 'All';
+        let isViewingGoogleSheets = false;
+
+        // ── DATA LOADER ───────────────────────────────────────────────
+        async function loadDataFromSheet() {
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+                const response = await fetch(sheetUrl, { signal: controller.signal });
+                clearTimeout(timeoutId);
+
+                if (!response.ok) throw new Error(`Sheet link failed (${response.status})`);
+
+                const csvData = await response.text();
+                if (!csvData || csvData.length === 0) throw new Error("Sheet returned empty data");
+
+                const rows = csvData.split('\n').filter(row => row.trim()).slice(1);
+
+                DATA = rows.map((row, idx) => {
+                    const cols = row.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+                    if (cols.length < 5) {
+                        console.warn(`⚠️ Row ${idx} has only ${cols.length} columns (need 5):`, row);
+                        return null;
+                    }
+                    return {
+                        title:        cols[0]?.replace(/"/g, '').trim(),
+                        industry:     cols[1]?.replace(/"/g, '').trim(),
+                        description:  cols[2]?.replace(/"/g, '').trim(),
+                        dashboardUrl: cols[3]?.replace(/"/g, '').trim(),
+                        imageUrl:     cols[4]?.replace(/"/g, '').trim()
+                    };
+                }).filter(p => p !== null && p.title !== "");
+
+                if (DATA.length === 0) throw new Error("No valid projects found in sheet");
+
+                refresh();
+            } catch (error) {
+                console.error("❌ Error loading sheet:", error);
+                document.getElementById('portfolio-grid').innerHTML =
+                    `<div style="grid-column:1/-1;text-align:center;padding:100px;color:#999;">
+                        <strong>Could not load projects</strong><br>
+                        ${error.message}<br>
+                        <small>Make sure: 1) The sheet is shared as “Anyone with the link” 2) It is public or published for CSV access 3) The sheet ID is correct 4) Use the export URL, not the edit URL</small>
+                    </div>`;
+            }
+        }
+
+        // ── HELPERS & FILTERS ─────────────────────────────────────────
+        function gc(ind) {
+            for (const [k, v] of Object.entries(IC)) {
+                if (ind && ind.toLowerCase().includes(k.toLowerCase())) return v;
+            }
+            return {bg: THEME1};
+        }
+
+        function isGoogleSheet(industry) {
+            return industry && industry.trim().toLowerCase() === 'google sheet';
+        }
+
+        function buildFilters() {
+            const bar = document.getElementById('filters-container');
+            if (!bar) return;
+            bar.innerHTML = '<span class="fl">Sector:</span><button class="fb active" type="button" onclick="filter(\'All\', this)">All</button>';
+
+            [...new Set(DATA.map(p => p.industry))].forEach(ind => {
+                if (ind) {
+                    const b = document.createElement('button');
+                    b.className = 'fb';
+                    b.type = 'button';
+                    b.textContent = isGoogleSheet(ind) ? 'Google Sheets' : ind;
+                    b.onclick = (e) => filter(ind, e.target);
+                    bar.appendChild(b);
+                }
+            });
+        }
+
+        function filter(v, btn) {
+            AF = v;
+            isViewingGoogleSheets = (v.toLowerCase() === 'google sheet');
+
+            document.querySelectorAll('.fb').forEach(b => b.classList.remove('active'));
+            if (btn) {
+                btn.classList.add('active');
+            } else {
+                document.querySelectorAll('.fb').forEach(b => {
+                    if (b.textContent.trim().toLowerCase() === v.toLowerCase()) {
+                        b.classList.add('active');
+                    }
+                });
+            }
+
+            applyCurrentView();
+        }
+
+        function openGoogleSheetsGroup() {
+            isViewingGoogleSheets = true;
+            document.querySelectorAll('.fb').forEach(b => {
+                b.classList.toggle('active', b.textContent.trim().toLowerCase() === 'google sheet');
+            });
+            applyCurrentView();
+        }
+
+        function closeGoogleSheetsGroup() {
+            isViewingGoogleSheets = false;
+            AF = 'All';
+            document.querySelectorAll('.fb').forEach(b => {
+                b.classList.toggle('active', b.textContent.trim().toLowerCase() === 'all');
+            });
+            applyCurrentView();
+        }
+
+        function applyCurrentView() {
+            if (isViewingGoogleSheets) {
+                const sheetsList = DATA.filter(p => isGoogleSheet(p.industry));
+                renderNestedSheets(sheetsList);
+            } else {
+                const list = AF === 'All' ? DATA : DATA.filter(p => p.industry === AF);
+                renderMainGrid(list);
+            }
+        }
+
+        // ── RENDER FUNCTIONS ──────────────────────────────────────────
+        function renderMainGrid(list) {
+            const g = document.getElementById('portfolio-grid');
+
+            if (!list.length) {
+                g.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:100px;">No projects found.</div>';
+                return;
+            }
+
+            const standardItems = [];
+            const sheetItems = [];
+
+            list.forEach(p => {
+                if (isGoogleSheet(p.industry)) {
+                    sheetItems.push(p);
+                } else {
+                    standardItems.push(p);
+                }
+            });
+
+            let html = '';
+
+            // Render consolidated Google Sheets container card (without custom border)
+            if (sheetItems.length > 0) {
+                const previewImg = sheetItems[0].imageUrl || 'https://via.placeholder.com/400x200?text=Google+Sheets';
+                html += `
+                    <div class="portfolio-card google-sheets-folder" onclick="openGoogleSheetsGroup()" style="cursor:pointer;">
+                        <div class="card-header">
+                            <span class="industry-badge" style="background-color:${THEME1}; color:${THEME}; font-weight:700;">Google Sheets</span>
+                            <div class="image-container">
+                                <img src="${previewImg}" alt="Google Sheets Collection"
+                                    onerror="this.src='https://via.placeholder.com/400x200?text=Google+Sheets'">
+                            </div>
+                        </div>
+                        <div class="portfolio-info">
+                            <h3>Google Sheets</h3>
+                            <div class="desc-container">
+                                <p class="description">Collection of internal tracking and operational sheets (${sheetItems.length} total).</p>
+                            </div>
+                            <div class="open-btn" style="background:${THEME}">Open Collection (${sheetItems.length}) →</div>
+                        </div>
+                    </div>`;
+            }
+
+            // Render standard project cards
+            html += standardItems.map(p => {
+                const c = gc(p.industry);
+                return `
+                    <div class="portfolio-card" onclick="window.open('${p.dashboardUrl}', '_blank')">
+                        <div class="card-header">
+                            <span class="industry-badge" style="background-color:${c.bg}">${p.industry}</span>
+                            <div class="image-container">
+                                <img src="${p.imageUrl}" alt="${p.title}"
+                                    onerror="this.src='https://via.placeholder.com/400x200?text=Preview+Coming+Soon'">
+                            </div>
+                        </div>
+                        <div class="portfolio-info">
+                            <h3>${p.title}</h3>
+                            <div class="desc-container" data-fulltext="${p.description}">
+                                <p class="description">${p.description}</p>
+                            </div>
+                            <div class="open-btn" style="background:${THEME}">View Dashboard →</div>
+                        </div>
+                    </div>`;
+            }).join('');
+
+            g.innerHTML = html;
+        }
+
+        function renderNestedSheets(sheetsList) {
+            const g = document.getElementById('portfolio-grid');
+
+            const backBanner = `
+                <div style="grid-column: 1 / -1; display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px; padding: 14px 20px; background: #f0f4f8; border-radius: 8px;">
+                    <span style="font-weight: 600; font-size: 1.1rem; color: #1f2937;">Google Sheets Collection (${sheetsList.length})</span>
+                    <button type="button" onclick="closeGoogleSheetsGroup()" style="padding: 8px 16px; border:none; background:${THEME}; color:#fff; border-radius:6px; cursor:pointer; font-weight:600;">← Back to All</button>
+                </div>`;
+
+            const cards = sheetsList.map(p => `
+                <div class="portfolio-card" onclick="window.open('${p.dashboardUrl}', '_blank')">
+                    <div class="card-header">
+                        <span class="industry-badge" style="background-color:${THEME1}">Google sheet</span>
+                        <div class="image-container">
+                            <img src="${p.imageUrl}" alt="${p.title}"
+                                onerror="this.src='https://via.placeholder.com/400x200?text=Sheet+Preview'">
+                        </div>
+                    </div>
+                    <div class="portfolio-info">
+                        <h3>${p.title}</h3>
+                        <div class="desc-container" data-fulltext="${p.description}">
+                            <p class="description">${p.description}</p>
+                        </div>
+                        <div class="open-btn" style="background:${THEME}">Open Sheet ↗</div>
+                    </div>
+                </div>
+            `).join('');
+
+            g.innerHTML = backBanner + cards;
+        }
+
+        function refresh() {
+            buildFilters();
+            applyCurrentView();
+        }
+
+        loadDataFromSheet();
+    </script>
+</body>
+</html>
